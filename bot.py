@@ -1,36 +1,53 @@
 import os
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
-from openai import OpenAI
+import requests
 
-# Configurazione dei log
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "IL_TUO_TOKEN_TELEGRAM")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "LA_TUA_CHIAVE_OPENAI")
 
-# Legge i token in modo sicuro dalle variabili d'ambiente (sia locale che cloud)
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+URL = f"https://api.telegram.org/bot{TOKEN}"
 
-# Inizializza il client OpenAI
-client = OpenAI(api_key=OPENAI_API_KEY)
+def ask_openai(prompt):
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data)
+    result = response.json()
+    try:
+        return result["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"Errore con OpenAI: {str(e)}"
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_message = update.message.text
-    user_name = update.effective_user.first_name
-    
-    logging.info(f"Ricevuto messaggio da {user_name}: {user_message}")
+def get_updates(offset=None):
+    params = {"timeout": 30, "offset": offset}
+    response = requests.get(f"{URL}/getUpdates", params=params)
+    return response.json()
 
-    # Risposta temporanea di test
-    risposta_test = f"Ciao {user_name}! Ho ricevuto il tuo messaggio: '{user_message}'. Il sistema sul Cloud è attivo!"
-    
-    await update.message.reply_text(risposta_test)
+def send_message(chat_id, text):
+    payload = {"chat_id": chat_id, "text": text}
+    requests.post(f"{URL}/sendMessage", json=payload)
 
-if __name__ == '__main__':
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+def main():
+    print("Bot avviato con OpenAI...")
+    offset = None
+    while True:
+        updates = get_updates(offset)
+        if "result" in updates:
+            for update in updates["result"]:
+                offset = update["update_id"] + 1
+                if "message" in update and "text" in update["message"]:
+                    chat_id = update["message"]["chat"]["id"]
+                    text = update["message"]["text"]
+                    
+                    # Chiede a OpenAI la risposta
+                    ai_reply = ask_openai(text)
+                    
+                    # Risponde su Telegram
+                    send_message(chat_id, ai_reply)
 
-    print("Il bot è avviato e in ascolto...")
-    app.run_polling()
+if __name__ == "__main__":
+    main()
