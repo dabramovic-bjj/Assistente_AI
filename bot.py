@@ -7,13 +7,13 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "LA_TUA_CHIAVE_OPENAI")
 
 URL = f"https://api.telegram.org/bot{TOKEN}"
 
-# Dizionario per memorizzare la cronologia delle chat
 chat_histories = {}
 
 def ask_openai(chat_id, prompt):
     if chat_id not in chat_histories:
+        # Prompt corretto, amichevole e che ricorda esplicitamente di tenere a mente i dettagli della chat
         chat_histories[chat_id] = [
-            {"role": "system", "content": "Sei un assistente IA di livello senior, estremamente competente, chiaro, diretto e amichevole. Aiuti l'utente a risolvere problemi tecnici e organizzativi con precisione."}
+            {"role": "system", "content": "Sei un assistente virtuale amichevole, diretto e utile. Ricordi sempre i dettagli che l'utente ti dice durante la conversazione (come il suo nome o cosa studia) e rispondi in modo naturale e colloquiale."}
         ]
     
     chat_histories[chat_id].append({"role": "user", "content": prompt})
@@ -66,7 +66,7 @@ def send_message(chat_id, text):
         print(f"Errore nell'invio del messaggio Telegram: {e}")
 
 def main():
-    print("Bot avviato con carattere personalizzato, gestione errori e comando reset...")
+    print("Bot avviato con prompt amichevole e memoria attiva...")
     offset = None
     
     initial_updates = get_updates()
@@ -87,7 +87,7 @@ def main():
                     if text.strip().lower() == "/reset":
                         if chat_id in chat_histories:
                             del chat_histories[chat_id]
-                        send_message(chat_id, "Memoria resettata! Possiamo ricominciare da capo con un nuovo argomento.")
+                        send_message(chat_id, "Memoria resettata! Ricominciamo da capo.")
                         continue
                     
                     ai_reply = ask_openai(chat_id, text)
