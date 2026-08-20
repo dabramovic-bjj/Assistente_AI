@@ -15,7 +15,7 @@ tavily = TavilyClient(api_key=TAVILY_API_KEY)
 def load_history():
     if os.path.exists(DB_FILE):
         try:
-            with open(DB_FILE, "r") as f:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -34,17 +34,17 @@ def ask_openai(chat_id, prompt):
     chat_id_str = str(chat_id)
     if chat_id_str not in chat_histories:
         chat_histories[chat_id_str] = [
-            {"role": "system", "content": "Sei un assistente virtuale amichevole e intelligente. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate, precise e cita le fonti se necessario."}
+            {"role": "system", "content": "Sei un assistente virtuale amichevole. Ricordi che l'utente si chiama Matteo, ha 21 anni e studia economia. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate e precise citando le fonti."}
         ]
     
     messages = list(chat_histories[chat_id_str])
     
-    # 1. Chiediamo a OpenAI se questa domanda richiede una ricerca sul web in base all'attualità/tempo reale
+    # 1. Chiediamo a OpenAI se questa domanda richiede una ricerca web
     check_headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     check_data = {
         "model": "gpt-4o-mini",
         "messages": [
-            {"role": "system", "content": "Rispondi SOLO con la parola 'SI' se la seguente domanda richiede informazioni in tempo reale, notizie recenti, prezzi attuali, meteo o dati aggiornati che cambiano nel tempo. Rispondi SOLO con 'NO' se è una domanda generale, una conversazione o informazioni fisse."},
+            {"role": "system", "content": "Rispondi SOLO con la parola 'SI' se la domanda richiede informazioni in tempo reale, notizie recenti, prezzi attuali, meteo o dati aggiornati. Rispondi SOLO con 'NO' altrimenti."},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0
@@ -59,7 +59,7 @@ def ask_openai(chat_id, prompt):
     except Exception as e:
         print(f"Errore nel controllo della ricerca: {e}")
 
-    # 2. Se serve, eseguiamo la ricerca con Tavily e prendiamo fonti affidabili
+    # 2. Se serve, cerchiamo con Tavily
     if needs_search:
         try:
             search_response = tavily.search(query=prompt, search_depth="advanced", max_results=3)
@@ -103,7 +103,7 @@ def send_message(chat_id, text):
         print(f"Errore nell'invio del messaggio Telegram: {e}")
 
 def main():
-    print("Bot avviato con intelligenza di ricerca dinamica e memoria...")
+    print("Bot avviato correttamente con Tavily e Memoria...")
     offset = None
     
     try:
@@ -145,5 +145,5 @@ def main():
             print(f"Errore nel ciclo principale: {e}")
             time.sleep(3)
 
-if __name__ ==- "__main__":
+if __name__ == "__main__":
     main()
