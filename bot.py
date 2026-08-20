@@ -31,18 +31,38 @@ def save_history(history):
 chat_histories = load_history()
 
 def get_market_summary():
-    query = "andamento mercati finanziari oggi S&P 500 Nasdaq oro petrolio sintesi"
+    # Aggiungiamo l'anno corrente 2026 per forzare risultati freschi
+    query = "andamento mercati finanziari oggi 2026 S&P 500 Nasdaq oro petrolio sintesi"
     try:
         search_response = tavily.search(query=query, search_depth="advanced", max_results=3)
         results = search_response.get("results", [])
+        
         if not results:
             return "Non sono riuscito a trovare dati aggiornati sui mercati in questo momento."
-        context = "📊 **Report Flash Mercati:**\n\n"
+            
+        # Creiamo un contesto strutturato per OpenAI anziché sputare solo i link
+        context = "Fonti e notizie fresche sui mercati (Anno 2026):\n"
         for r in results:
-            title = r.get('title', 'Link')
-            url = r.get('url', '#')
-            context += f"- [{title}]({url})\n"
-        return context
+            title = r.get('title', '')
+            content = r.get('content', '')
+            url = r.get('url', '')
+            context += f"- [{title}]({url}): {content}\n"
+            
+        # Facciamo riassumere i risultati a GPT-4o-mini per avere un testo pulito e senza date sballate
+        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+        data = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": "Sei un assistente finanziario. Sulla base delle informazioni web fornite, scrivi un report flash sintetico e professionale sull'andamento dei mercati, menzionando che siamo nel 2026. Non inventare date passate."},
+                {"role": "user", "content": context}
+            ]
+        }
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=30)
+        result = response.json()
+        if "choices" in result:
+            return result["choices"][0]["message"]["content"]
+            
+        return "Errore nella generazione del report."
     except Exception as e:
         print(f"Errore ricerca mercati: {e}")
         return "Errore nel recupero dati mercati."
