@@ -8,40 +8,36 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "LA_TUA_CHIAVE_OPENAI")
 URL = f"https://api.telegram.org/bot{TOKEN}"
 DB_FILE = "chat_history.json"
 
+# Caricamento memoria dal file JSON (persistente)
 def load_history():
     if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(DB_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
     return {}
 
+# Salvataggio memoria su file JSON
 def save_history(history):
-    with open(DB_FILE, "w") as f:
-        json.dump(history, f)
+    try:
+        with open(DB_FILE, "w") as f:
+            json.dump(history, f)
+    except Exception as e:
+        print(f"Errore nel salvataggio della memoria: {e}")
 
 chat_histories = load_history()
-
-# Funzione per ottenere il meteo in tempo reale
-def get_weather(city):
-    try:
-        # Usiamo wttr.in formattato in modo semplice (lingua italiana)
-        url = f"https://wttr.in/{city}?format=3&lang=it"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            return response.text.strip()
-        else:
-            return "Non sono riuscito a recuperare il meteo per questa località."
-    except Exception:
-        return "Errore di connessione al servizio meteo."
 
 def ask_openai(chat_id, prompt):
     chat_id_str = str(chat_id)
     if chat_id_str not in chat_histories:
         chat_histories[chat_id_str] = [
-            {"role": "system", "content": "Sei un assistente virtuale amichevole. Hai una memoria a breve termine. Quando l'utente ti chiede cosa ti ricordi di lui, elenca i dettagli che ti ha detto basandoti sulla chat."}
+            {"role": "system", "content": "Sei un assistente virtuale amichevole. Hai una memoria a breve termine. Ricordi sempre i dettagli che l'utente ti dice (come il suo nome o cosa studia) e li usi per rispondere in modo naturale."}
         ]
     
     chat_histories[chat_id_str].append({"role": "user", "content": prompt})
     
+    # Mantiene gli ultimi messaggi per non sovraccaricare la memoria
     if len(chat_histories[chat_id_str]) > 11:
         chat_histories[chat_id_str] = [chat_histories[chat_id_str][0]] + chat_histories[chat_id_str][-10:]
 
@@ -56,7 +52,7 @@ def ask_openai(chat_id, prompt):
             if "choices" in result:
                 reply = result["choices"][0]["message"]["content"]
                 chat_histories[chat_id_str].append({"role": "assistant", "content": reply})
-                save_history(chat_histories)
+                save_history(chat_histories) # Salva subito su file
                 return reply
             else:
                 return f"Errore nella risposta di OpenAI: {result.get('error', 'Risposta non valida')}"
@@ -65,7 +61,7 @@ def ask_openai(chat_id, prompt):
                 return f"Errore di connessione con OpenAI dopo {max_retries} tentativi: {str(e)}"
             time.sleep(2)
 
-    return "Errore imprevisto."
+    return "Errore imprevisto nella comunicazione con l'IA."
 
 def send_message(chat_id, text):
     try:
@@ -75,12 +71,15 @@ def send_message(chat_id, text):
         print(f"Errore nell'invio del messaggio Telegram: {e}")
 
 def main():
-    print("Bot avviato con memoria persistente e meteo...")
+    print("Bot avviato con memoria persistente JSON e chat pulita (senza tasti)...")
     offset = None
     
-    initial_updates = requests.get(f"{URL}/getUpdates").json()
-    if "result" in initial_updates and initial_updates["result"]:
-        offset = initial_updates["result"][-1]["update_id"] + 1
+    try:
+        initial_updates = requests.get(f"{URL}/getUpdates", timeout=10).json()
+        if "result" in initial_updates and initial_updates["result"]:
+            offset = initial_updates["result"][-1]["update_id"] + 1
+    except Exception:
+        pass
 
     while True:
         try:
@@ -99,18 +98,6 @@ def main():
                                 del chat_histories[str(chat_id)]
                                 save_history(chat_histories)
                             send_message(chat_id, "Memoria resettata! Ricominciamo da capo.")
-                        
-                        # Controllo semplice se l'utente chiede il meteo
-                        elif "meteo" in text_lower or "tempo fa" in text_lower:
-                            # Estraiamo una città di default o proviamo a cercarla nel testo (es. "meteo torino")
-                            words = text.split()
-                            city = "Torino" # Città predefinita se non specificata
-                            if len(words) > 1:
-                                city = words[-1] # Prende l'ultima parola come città
-                            
-                            weather_info = get_weather(city)
-                            send_message(chat_id, f"Meteo per {city}: {weather_info}")
-                        
                         else:
                             ai_reply = ask_openai(chat_id, text)
                             send_message(chat_id, ai_reply)
