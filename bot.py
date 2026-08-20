@@ -30,74 +30,80 @@ def save_history(history):
 
 chat_histories = load_history()
 
-def ask_openai(chat_id, prompt, image_url=None):
+def get_market_summary():
+    query = "andamento mercati finanziari oggi S&P 500 Nasdaq oro petrolio sintesi"
+    try:
+        search_response = tavily.search(query=query, search_depth="advanced", max_results=3)
+        results = search_response.get("results", [])
+        if not results:
+            return "Non sono riuscito a trovare dati aggiornati sui mercati in questo momento."
+        context = "📊 **Report Flash Mercati:**\n\n"
+        for r in results:
+            title = r.get('title', 'Link')
+            url = r.get('url', '#')
+            context += f"- [{title}]({url})\n"
+        return context
+    except Exception as e:
+        print(f"Errore ricerca mercati: {e}")
+        return "Errore nel recupero dati mercati."
+
+def ask_openai(chat_id, prompt):
     chat_id_str = str(chat_id)
     if chat_id_str not in chat_histories:
         chat_histories[chat_id_str] = [
-            {"role": "system", "content": "Sei un assistente virtuale amichevole ed esperto di economia. Ricordi che l'utente si chiama Matteo, ha 21 anni e studia economia. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate e precise citando le fonti."}
+            {"role": "system", "content": "Sei un assistente virtuale amichevole. Ricordi che l'utente si chiama Matteo, ha 21 anni e studia economia. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate e precise citando le fonti."}
         ]
     
     messages = list(chat_histories[chat_id_str])
     
-    # Gestione della richiesta se include un'immagine o richiede ricerca
+    check_headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    check_data = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": "Rispondi SOLO con la parola 'SI' se la domanda richiede informazioni in tempo reale, notizie recenti, prezzi attuali, meteo o dati aggiornati. Rispondi SOLO con 'NO' altrimenti."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0
+    }
+    
     needs_search = False
-    if not image_url:
-        check_headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-        check_data = {
-            "model": "gpt-4o-mini",
-            "messages": [
-                {"role": "system", "content": "Rispondi SOLO con la parola 'SI' se la domanda richiede informazioni in tempo reale, notizie recenti, prezzi attuali, meteo o dati aggiornati. Rispondi SOLO con 'NO' altrimenti."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0
-        }
+    try:
+        check_res = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=check_data, timeout=10)
+        answer = check_res.json()["choices"][0]["message"]["content"].strip().upper()
+        if "SI" in answer:
+            needs_search = True
+    except Exception as e:
+        print(f"Errore nel controllo della ricerca: {e}")
+
+    if needs_search:
         try:
-            check_res = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=check_data, timeout=10)
-            answer = check_res.json()["choices"][0]["message"]["content"].strip().upper()
-            if "SI" in answer:
-                needs_search = True
+            search_response = tavily.search(query=prompt, search_depth="advanced", max_results=3)
+            results = search_response.get("results", [])
+            if results:
+                context = "Fonti web ufficiali e aggiornate:\n"
+                for r in results:
+                    title = r.get('title', '')
+                    content = r.get('content', '')
+                    url = r.get('url', '')
+                    context += f"- [{title}]({url}): {content}\n"
+                
+                messages.append({"role": "system", "content": context})
         except Exception as e:
-            print(f"Errore nel controllo della ricerca: {e}")
+            print(f"Errore durante la ricerca Tavily: {e}")
 
-        if needs_search:
-            try:
-                search_response = tavily.search(query=prompt, search_depth="advanced", max_results=3)
-                results = search_response.get("results", [])
-                if results:
-                    context = "Fonti web ufficiali e aggiornate:\n"
-                    for r in results:
-                        title = r.get('title', '')
-                        content = r.get('content', '')
-                        url = r.get('url', '')
-                        context += f"- [{title}]({url}): {content}\n"
-                    messages.append({"role": "system", "content": context})
-            except Exception as e:
-                print(f"Errore durante la ricerca Tavily: {e}")
-
-    # Costruiamo il messaggio utente (supporto testo o multimediale con immagine)
-    if image_url:
-        user_content = [
-            {"type": "text", "text": prompt if prompt else "Analizza questa immagine."},
-            {"type": "image_url", "image_url": {"url": image_url}}
-        ]
-    else:
-        user_content = prompt
-
-    messages.append({"role": "user", "content": user_content})
+    messages.append({"role": "user", "content": prompt})
     
     if len(messages) > 12:
         messages = [messages[0]] + messages[-11:]
 
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     data = {"model": "gpt-4o-mini", "messages": messages}
     
     try:
-        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=30)
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=data, timeout=30)
         result = response.json()
         if "choices" in result:
             reply = result["choices"][0]["message"]["content"]
-            # Salviamo una versione testuale nello storico per evitare conflitti con la struttura dell'immagine
-            chat_histories[chat_id_str].append({"role": "user", "content": prompt if prompt else "[Immagine inviata]"})
+            chat_histories[chat_id_str].append({"role": "user", "content": prompt})
             chat_histories[chat_id_str].append({"role": "assistant", "content": reply})
             save_history(chat_histories)
             return reply
@@ -106,23 +112,13 @@ def ask_openai(chat_id, prompt, image_url=None):
 
 def send_message(chat_id, text):
     try:
-        payload = {"chat_id": chat_id, "text": text}
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
         requests.post(f"{URL}/sendMessage", json=payload, timeout=10)
     except Exception as e:
         print(f"Errore nell'invio del messaggio Telegram: {e}")
 
-def get_telegram_file_url(file_id):
-    try:
-        file_info = requests.get(f"{URL}/getFile?file_id={file_id}", timeout=10).json()
-        if "result" in file_info:
-            file_path = file_info["result"]["file_path"]
-            return f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
-    except Exception as e:
-        print(f"Errore nel recupero del file Telegram: {e}")
-    return None
-
 def main():
-    print("Bot avanzato avviato con successo...")
+    print("Bot avviato correttamente con comando /mercati e Tavily...")
     offset = None
     
     try:
@@ -148,46 +144,23 @@ def main():
                     if len(processed_updates) > 100:
                         processed_updates.pop()
 
-                    chat_id = update["message"]["chat"]["id"] if "message" in update else None
-                    if not chat_id:
-                        continue
-
-                    message = update["message"]
-                    
-                    # Gestione Comando /reset
-                    if "text" in message and message["text"].strip().lower() == "/reset":
-                        if str(chat_id) in chat_histories:
-                            del chat_histories[str(chat_id)]
-                            save_history(chat_histories)
-                        send_message(chat_id, "Memoria resettata! Ricominciamo da capo.")
-                    
-                    # Gestione Comando /mercati (Flash mercati finanziari)
-                    elif "text" in message and message["text"].strip().lower() == "/mercati":
-                        send_message(chat_id, "Analizzo la situazione dei mercati finanziari globali...")
-                        market_query = "ultime notizie borse mercati finanziari andamento oggi"
-                        ai_reply = ask_openai(chat_id, market_query)
-                        send_message(chat_id, ai_reply)
-
-                    # Gestione Immagini inviate dall'utente
-                    elif "photo" in message:
-                        # Prende la foto a risoluzione più alta (l'ultima della lista)
-                        photo = message["photo"][-1]
-                        file_id = photo["file_id"]
-                        caption = message.get("caption", "Analizza questa immagine.")
+                    if "message" in update and "text" in update["message"]:
+                        chat_id = update["message"]["chat"]["id"]
+                        text = update["message"]["text"].strip()
                         
-                        image_url = get_telegram_file_url(file_id)
-                        if image_url:
-                            ai_reply = ask_openai(chat_id, caption, image_url=image_url)
-                            send_message(chat_id, ai_reply)
+                        if text.lower() == "/reset":
+                            if str(chat_id) in chat_histories:
+                                del chat_histories[str(chat_id)]
+                                save_history(chat_histories)
+                            send_message(chat_id, "Memoria resettata! Ricominciamo da capo.")
+                        
+                        elif text.lower() == "/mercati":
+                            summary = get_market_summary()
+                            send_message(chat_id, summary)
+                            
                         else:
-                            send_message(chat_id, "Non sono riuscito a elaborare l'immagine.")
-
-                    # Gestione Messaggi di testo normali
-                    elif "text" in message:
-                        text = message["text"].strip()
-                        ai_reply = ask_openai(chat_id, text)
-                        send_message(chat_id, ai_reply)
-
+                            ai_reply = ask_openai(chat_id, text)
+                            send_message(chat_id, ai_reply)
         except Exception as e:
             print(f"Errore nel ciclo principale: {e}")
             time.sleep(3)
