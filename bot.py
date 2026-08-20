@@ -12,8 +12,6 @@ chat_histories = {}
 
 def ask_openai(chat_id, prompt):
     if chat_id not in chat_histories:
-        # PUNTO 2: Personalizzazione del "Carattere" (System Prompt)
-        # Puoi cambiare questa frase per dare la personalità che preferisci al tuo bot!
         chat_histories[chat_id] = [
             {"role": "system", "content": "Sei un assistente IA di livello senior, estremamente competente, chiaro, diretto e amichevole. Aiuti l'utente a risolvere problemi tecnici e organizzativi con precisione."}
         ]
@@ -32,7 +30,6 @@ def ask_openai(chat_id, prompt):
         "messages": chat_histories[chat_id]
     }
     
-    # PUNTO 3: Gestione robusta degli errori di rete con tentativi multipli (retry)
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -48,8 +45,8 @@ def ask_openai(chat_id, prompt):
                 
         except requests.exceptions.RequestException as e:
             if attempt == max_retries - 1:
-                return f"Errore di connessione con OpenAI dopo {max_retries tentativa}: {str(e)}"
-            time.sleep(2) # Aspetta 2 secondi prima di riprovare
+                return f"Errore di connessione con OpenAI dopo {max_retries} tentativi: {str(e)}"
+            time.sleep(2)
 
     return "Errore imprevisto nella comunicazione con l'IA."
 
@@ -87,14 +84,12 @@ def main():
                     chat_id = update["message"]["chat"]["id"]
                     text = update["message"]["text"]
                     
-                    # PUNTO 1: Gestione del comando /reset per pulire la memoria
                     if text.strip().lower() == "/reset":
                         if chat_id in chat_histories:
                             del chat_histories[chat_id]
                         send_message(chat_id, "Memoria resettata! Possiamo ricominciare da capo con un nuovo argomento.")
                         continue
                     
-                    # Gestione normale del messaggio con l'IA
                     ai_reply = ask_openai(chat_id, text)
                     send_message(chat_id, ai_reply)
 
