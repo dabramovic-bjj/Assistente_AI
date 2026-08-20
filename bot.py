@@ -30,48 +30,11 @@ def save_history(history):
 
 chat_histories = load_history()
 
-def get_market_summary():
-    # Aggiungiamo l'anno corrente 2026 per forzare risultati freschi
-    query = "andamento mercati finanziari oggi 2026 S&P 500 Nasdaq oro petrolio sintesi"
-    try:
-        search_response = tavily.search(query=query, search_depth="advanced", max_results=3)
-        results = search_response.get("results", [])
-        
-        if not results:
-            return "Non sono riuscito a trovare dati aggiornati sui mercati in questo momento."
-            
-        # Creiamo un contesto strutturato per OpenAI anziché sputare solo i link
-        context = "Fonti e notizie fresche sui mercati (Anno 2026):\n"
-        for r in results:
-            title = r.get('title', '')
-            content = r.get('content', '')
-            url = r.get('url', '')
-            context += f"- [{title}]({url}): {content}\n"
-            
-        # Facciamo riassumere i risultati a GPT-4o-mini per avere un testo pulito e senza date sballate
-        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-        data = {
-            "model": "gpt-4o-mini",
-            "messages": [
-                {"role": "system", "content": "Sei un assistente finanziario. Sulla base delle informazioni web fornite, scrivi un report flash sintetico e professionale sull'andamento dei mercati, menzionando che siamo nel 2026. Non inventare date passate."},
-                {"role": "user", "content": context}
-            ]
-        }
-        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=30)
-        result = response.json()
-        if "choices" in result:
-            return result["choices"][0]["message"]["content"]
-            
-        return "Errore nella generazione del report."
-    except Exception as e:
-        print(f"Errore ricerca mercati: {e}")
-        return "Errore nel recupero dati mercati."
-
 def ask_openai(chat_id, prompt):
     chat_id_str = str(chat_id)
     if chat_id_str not in chat_histories:
         chat_histories[chat_id_str] = [
-            {"role": "system", "content": "Sei un assistente virtuale amichevole. Ricordi che l'utente si chiama Matteo, ha 21 anni e studia economia. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate e precise citando le fonti."}
+            {"role": "system", "content": "Sei un assistente virtuale amichevole. Oggi è il 20 agosto 2026. Ricordi che l'utente si chiama Matteo, ha 21 anni e studia economia. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate e precise citando le fonti."}
         ]
     
     messages = list(chat_histories[chat_id_str])
@@ -100,7 +63,7 @@ def ask_openai(chat_id, prompt):
             search_response = tavily.search(query=prompt, search_depth="advanced", max_results=3)
             results = search_response.get("results", [])
             if results:
-                context = "Fonti web ufficiali e aggiornate:\n"
+                context = "Fonti web ufficiali e aggiornate (Anno 2026):\n"
                 for r in results:
                     title = r.get('title', '')
                     content = r.get('content', '')
@@ -138,7 +101,7 @@ def send_message(chat_id, text):
         print(f"Errore nell'invio del messaggio Telegram: {e}")
 
 def main():
-    print("Bot avviato correttamente con comando /mercati e Tavily...")
+    print("Bot avviato correttamente...")
     offset = None
     
     try:
@@ -173,11 +136,6 @@ def main():
                                 del chat_histories[str(chat_id)]
                                 save_history(chat_histories)
                             send_message(chat_id, "Memoria resettata! Ricominciamo da capo.")
-                        
-                        elif text.lower() == "/mercati":
-                            summary = get_market_summary()
-                            send_message(chat_id, summary)
-                            
                         else:
                             ai_reply = ask_openai(chat_id, text)
                             send_message(chat_id, ai_reply)
