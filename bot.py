@@ -10,7 +10,6 @@ TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "TUA_CHIAVE_TAVILY")
 URL = f"https://api.telegram.org/bot{TOKEN}"
 DB_FILE = "chat_history.json"
 
-# Inizializziamo il client di Tavily
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 def load_history():
@@ -24,8 +23,8 @@ def load_history():
 
 def save_history(history):
     try:
-        with open(DB_FILE, "w") as f:
-            json.dump(history, f)
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=4)
     except Exception as e:
         print(f"Errore nel salvataggio della memoria: {e}")
 
@@ -35,25 +34,45 @@ def ask_openai(chat_id, prompt):
     chat_id_str = str(chat_id)
     if chat_id_str not in chat_histories:
         chat_histories[chat_id_str] = [
-            {"role": "system", "content": "Sei un assistente virtuale amichevole e intelligente. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate e precise."}
+            {"role": "system", "content": "Sei un assistente virtuale amichevole e intelligente. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate, precise e cita le fonti se necessario."}
         ]
-    
-    # Parole chiave o condizioni per decidere se effettuare una ricerca web
-    search_keywords = ["notizie", "chi è", "cos'è", "ultime", "quanto costa", "quando", "partita", "meteo", "tempo fa", "oggi", "2026"]
-    needs_search = any(word in prompt.lower() for word in search_keywords)
     
     messages = list(chat_histories[chat_id_str])
     
-    # Se serve la ricerca, interroghiamo Tavily
+    # 1. Chiediamo a OpenAI se questa domanda richiede una ricerca sul web in base all'attualità/tempo reale
+    check_headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    check_data = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": "Rispondi SOLO con la parola 'SI' se la seguente domanda richiede informazioni in tempo reale, notizie recenti, prezzi attuali, meteo o dati aggiornati che cambiano nel tempo. Rispondi SOLO con 'NO' se è una domanda generale, una conversazione o informazioni fisse."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0
+    }
+    
+    needs_search = False
+    try:
+        check_res = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=check_data, timeout=10)
+        answer = check_res.json()["choices"][0]["message"]["content"].strip().upper()
+        if "SI" in answer:
+            needs_search = True
+    except Exception as e:
+        print(f"Errore nel controllo della ricerca: {e}")
+
+    # 2. Se serve, eseguiamo la ricerca con Tavily e prendiamo fonti affidabili
     if needs_search:
         try:
-            search_response = tavily.search(query=prompt, search_depth="basic", max_results=3)
+            search_response = tavily.search(query=prompt, search_depth="advanced", max_results=3)
             results = search_response.get("results", [])
             if results:
-                context = ""
+                context = "Fonti web ufficiali e aggiornate:\n"
                 for r in results:
-                    context += f"- {r.get('title', '')}: {r.get('content', '')}\n"
-                messages.append({"role": "system", "content": f"Ecco informazioni aggiornate dal web:\n{context}"})
+                    title = r.get('title', '')
+                    content = r.get('content', '')
+                    url = r.get('url', '')
+                    context += f"- [{title}]({url}): {content}\n"
+                
+                messages.append({"role": "system", "content": context})
         except Exception as e:
             print(f"Errore durante la ricerca Tavily: {e}")
 
@@ -62,11 +81,10 @@ def ask_openai(chat_id, prompt):
     if len(messages) > 12:
         messages = [messages[0]] + messages[-11:]
 
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     data = {"model": "gpt-4o-mini", "messages": messages}
     
     try:
-        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=30)
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=data, timeout=30)
         result = response.json()
         if "choices" in result:
             reply = result["choices"][0]["message"]["content"]
@@ -85,7 +103,7 @@ def send_message(chat_id, text):
         print(f"Errore nell'invio del messaggio Telegram: {e}")
 
 def main():
-    print("Bot avviato con memoria e ricerca web Tavily...")
+    print("Bot avviato con intelligenza di ricerca dinamica e memoria...")
     offset = None
     
     try:
@@ -99,7 +117,7 @@ def main():
 
     while True:
         try:
-            updates = requests.get(f"$URL/getUpdates", params={"timeout": 30, "offset": offset}).json() if False else requests.get(f"{URL}/getUpdates", params={"timeout": 30, "offset": offset}).json()
+            updates = requests.get(f"{URL}/getUpdates", params={"timeout": 30, "offset": offset}).json()
             if "result" in updates:
                 for update in updates["result"]:
                     update_id = update["update_id"]
@@ -127,5 +145,5 @@ def main():
             print(f"Errore nel ciclo principale: {e}")
             time.sleep(3)
 
-if __name__ == "__main__":
+if __name__ ==- "__main__":
     main()
