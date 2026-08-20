@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "IL_TUO_TOKEN_TELEGRAM")
@@ -11,8 +12,10 @@ chat_histories = {}
 
 def ask_openai(chat_id, prompt):
     if chat_id not in chat_histories:
+        # PUNTO 2: Personalizzazione del "Carattere" (System Prompt)
+        # Puoi cambiare questa frase per dare la personalità che preferisci al tuo bot!
         chat_histories[chat_id] = [
-            {"role": "system", "content": "Sei un assistente virtuale utile, amichevole e intelligente."}
+            {"role": "system", "content": "Sei un assistente IA di livello senior, estremamente competente, chiaro, diretto e amichevole. Aiuti l'utente a risolvere problemi tecnici e organizzativi con precisione."}
         ]
     
     chat_histories[chat_id].append({"role": "user", "content": prompt})
@@ -29,29 +32,46 @@ def ask_openai(chat_id, prompt):
         "messages": chat_histories[chat_id]
     }
     
-    try:
-        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data)
-        result = response.json()
-        reply = result["choices"][0]["message"]["content"]
-        chat_histories[chat_id].append({"role": "assistant", "content": reply})
-        return reply
-    except Exception as e:
-        return f"Errore con OpenAI: {str(e)}"
+    # PUNTO 3: Gestione robusta degli errori di rete con tentativi multipli (retry)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=30)
+            result = response.json()
+            
+            if "choices" in result:
+                reply = result["choices"][0]["message"]["content"]
+                chat_histories[chat_id].append({"role": "assistant", "content": reply})
+                return reply
+            else:
+                return f"Errore nella risposta di OpenAI: {result.get('error', 'Risposta non valida')}"
+                
+        except requests.exceptions.RequestException as e:
+            if attempt == max_retries - 1:
+                return f"Errore di connessione con OpenAI dopo {max_retries tentativa}: {str(e)}"
+            time.sleep(2) # Aspetta 2 secondi prima di riprovare
+
+    return "Errore imprevisto nella comunicazione con l'IA."
 
 def get_updates(offset=None):
-    params = {"timeout": 30, "offset": offset}
-    response = requests.get(f"{URL}/getUpdates", params=params)
-    return response.json()
+    try:
+        params = {"timeout": 30, "offset": offset}
+        response = requests.get(f"{URL}/getUpdates", params=params, timeout=35)
+        return response.json()
+    except Exception:
+        return {}
 
 def send_message(chat_id, text):
-    payload = {"chat_id": chat_id, "text": text}
-    requests.post(f"{URL}/sendMessage", json=payload)
+    try:
+        payload = {"chat_id": chat_id, "text": text}
+        requests.post(f"{URL}/sendMessage", json=payload, timeout=10)
+    except Exception as e:
+        print(f"Errore nell'invio del messaggio Telegram: {e}")
 
 def main():
-    print("Bot avviato con sincronizzazione pulita...")
+    print("Bot avviato con carattere personalizzato, gestione errori e comando reset...")
     offset = None
     
-    # Consuma e scarta tutti i messaggi arretrati in modo aggressivo all'avvio
     initial_updates = get_updates()
     if "result" in initial_updates and initial_updates["result"]:
         offset = initial_updates["result"][-1]["update_id"] + 1
@@ -67,6 +87,14 @@ def main():
                     chat_id = update["message"]["chat"]["id"]
                     text = update["message"]["text"]
                     
+                    # PUNTO 1: Gestione del comando /reset per pulire la memoria
+                    if text.strip().lower() == "/reset":
+                        if chat_id in chat_histories:
+                            del chat_histories[chat_id]
+                        send_message(chat_id, "Memoria resettata! Possiamo ricominciare da capo con un nuovo argomento.")
+                        continue
+                    
+                    # Gestione normale del messaggio con l'IA
                     ai_reply = ask_openai(chat_id, text)
                     send_message(chat_id, ai_reply)
 
