@@ -33,8 +33,9 @@ chat_histories = load_history()
 def ask_openai(chat_id, prompt):
     chat_id_str = str(chat_id)
     if chat_id_str not in chat_histories:
+        # PROMPT NEUTRO: Il bot non sa nulla di te, imparerà solo da quello che gli dici in chat
         chat_histories[chat_id_str] = [
-            {"role": "system", "content": "Sei un assistente virtuale amichevole. Oggi è il 20 agosto 2026. Ricordi che l'utente si chiama Matteo, ha 21 anni e studia economia. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate e precise citando le fonti."}
+            {"role": "system", "content": "Sei un assistente virtuale amichevole e intelligente. Oggi è il 20 agosto 2026. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate e precise citando le fonti."}
         ]
     
     messages = list(chat_histories[chat_id_str])
@@ -101,7 +102,7 @@ def send_message(chat_id, text):
         print(f"Errore nell'invio del messaggio Telegram: {e}")
 
 def main():
-    print("Bot avviato correttamente...")
+    print("Bot avviato correttamente con memoria dinamica...")
     offset = None
     
     try:
@@ -135,7 +136,7 @@ def main():
                             if str(chat_id) in chat_histories:
                                 del chat_histories[str(chat_id)]
                                 save_history(chat_histories)
-                            send_message(chat_id, "Memoria resettata! Ricominciamo da capo.")
+                            send_message(chat_id, "Memoria resettata! Ora non so più nulla di te, ricominciamo.")
                         else:
                             ai_reply = ask_openai(chat_id, text)
                             send_message(chat_id, ai_reply)
