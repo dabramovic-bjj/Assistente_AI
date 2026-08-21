@@ -42,8 +42,13 @@ def leggi_file_da_telegram(file_id):
             doc = Document(io.BytesIO(file_bytes))
             testo_estratto = "\n".join([p.text for p in doc.paragraphs])
         elif ext in ["xlsx", "xls", "csv"]:
-            df = pd.read_excel(io.BytesIO(file_bytes)) if ext != 'csv' else pd.read_csv(io.BytesIO(file_bytes))
-            testo_estratto = df.to_string() # Converte la tabella in formato testo
+            # Usiamo un approccio più leggero
+            if ext == 'csv':
+                df = pd.read_csv(io.BytesIO(file_bytes), nrows=50) # Legge solo prime 50 righe
+            else:
+                df = pd.read_excel(io.BytesIO(file_bytes), nrows=50) # Legge solo prime 50 righe
+            
+            testo_estratto = f"Dati estratti (prime 50 righe):\n{df.to_string()}"
         elif ext in ["txt", "py", "json", "md"]:
             testo_estratto = file_bytes.decode("utf-8", errors="ignore")
         else:
