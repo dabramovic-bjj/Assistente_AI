@@ -113,7 +113,7 @@ def main():
                         contenuto = leggi_file_da_telegram(file_info["file_id"], file_name)
                         
                         # Se l'utente chiede un report, una modifica o la creazione di un documento
-                        if any(parola in text.lower() for in ["modifica", "report", "crea", "scrivi", "genera", "sintesi"]):
+                        if any(parola in text.lower() for parola in ["modifica", "report", "crea", "scrivi", "genera", "sintesi"]):
                             prompt = f"Istruzioni utente: {text}. Analizza il seguente contenuto estratto, estrapola i dati chiave e genera un report dettagliato/testo aggiornato. Restituisci SOLO il testo finale:\n\n{contenuto}"
                             risultato = ask_openai(chat_id, prompt)
                             crea_e_invia_docx_modificato(chat_id, risultato, file_name)
