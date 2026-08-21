@@ -33,9 +33,8 @@ chat_histories = load_history()
 def ask_openai(chat_id, prompt):
     chat_id_str = str(chat_id)
     if chat_id_str not in chat_histories:
-        # PROMPT NEUTRO: Il bot non sa nulla di te, imparerà solo da quello che gli dici in chat
         chat_histories[chat_id_str] = [
-            {"role": "system", "content": "Sei un assistente virtuale amichevole e intelligente. Oggi è il 20 agosto 2026. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate e precise citando le fonti."}
+            {"role": "system", "content": "Sei un assistente virtuale amichevole e intelligente. Oggi è il 21 agosto 2026. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate e precise citando le fonti."}
         ]
     
     messages = list(chat_histories[chat_id_str])
@@ -102,9 +101,10 @@ def send_message(chat_id, text):
         print(f"Errore nell'invio del messaggio Telegram: {e}")
 
 def main():
-    print("Bot avviato correttamente con memoria dinamica...")
+    print("Bot avviato con fix anti-doppio messaggio...")
     offset = None
     
+    # Sincronizzazione iniziale per saltare i messaggi vecchi
     try:
         initial_updates = requests.get(f"{URL}/getUpdates", timeout=10).json()
         if "result" in initial_updates and initial_updates["result"]:
@@ -112,21 +112,16 @@ def main():
     except Exception:
         pass
 
-    processed_updates = set()
-
     while True:
         try:
+            # Richiesta a lungo polling con offset aggiornato
             updates = requests.get(f"{URL}/getUpdates", params={"timeout": 30, "offset": offset}).json()
+            
             if "result" in updates:
                 for update in updates["result"]:
                     update_id = update["update_id"]
+                    # Spostiamo subito l'offset in avanti così Telegram sa che abbiamo preso in carico questo update
                     offset = update_id + 1
-                    
-                    if update_id in processed_updates:
-                        continue
-                    processed_updates.add(update_id)
-                    if len(processed_updates) > 100:
-                        processed_updates.pop()
 
                     if "message" in update and "text" in update["message"]:
                         chat_id = update["message"]["chat"]["id"]
@@ -140,6 +135,7 @@ def main():
                         else:
                             ai_reply = ask_openai(chat_id, text)
                             send_message(chat_id, ai_reply)
+                            
         except Exception as e:
             print(f"Errore nel ciclo principale: {e}")
             time.sleep(3)
