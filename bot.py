@@ -7,6 +7,7 @@ import pandas as pd
 from pypdf import PdfReader
 from docx import Document
 from tavily import TavilyClient
+from fpdf import FPDF
 
 # Configurazione
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "IL_TUO_TOKEN_TELEGRAM")
@@ -74,11 +75,34 @@ def send_message(chat_id, text):
     except: pass
 
 def crea_e_invia_file_modificato(chat_id, testo_modificato, nome_originale):
-    doc = Document()
-    doc.add_paragraph(testo_modificato)
-    nuovo_nome = f"modificato_{nome_originale.replace('.docx', '')}.docx"
-    doc.save(nuovo_nome)
-    with open(nuovo_nome, 'rb') as f:
+    ext = nome_originale.split('.')[-1].lower()
+    base_name = nome_originale.rsplit('.', 1)[0]
+    path = ""
+    
+    if ext in ['docx', 'doc']:
+        doc = Document()
+        doc.add_paragraph(testo_modificato)
+        path = f"modificato_{base_name}.docx"
+        doc.save(path)
+    elif ext in ['xlsx', 'xls']:
+        try:
+            df = pd.read_csv(io.StringIO(testo_modificato))
+            path = f"modificato_{base_name}.xlsx"
+            df.to_excel(path, index=False)
+        except:
+            send_message(chat_id, "Errore nella creazione Excel. Assicurati che l'IA abbia fornito dati in formato tabella/CSV.")
+            return
+    elif ext == 'pdf':
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        testo_pulito = testo_modificato.encode('latin-1', 'replace').decode('latin-1')
+        for line in testo_pulito.split('\n'):
+            pdf.cell(200, 10, txt=line, ln=True)
+        path = f"modificato_{base_name}.pdf"
+        pdf.output(path)
+    
+    with open(path, 'rb') as f:
         requests.post(f"{URL}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
 
 def main():
@@ -104,11 +128,18 @@ def main():
                             contenuto = leggi_file_da_telegram(file_id)
                             
                             if istruzioni:
-                                send_message(chat_id, "✍️ Sto modificando il documento...")
-                                prompt = f"Istruzioni: {istruzioni}. Modifica il testo seguente e restituisci solo il testo aggiornato:\n\n{contenuto}"
+                                send_message(chat_id, "✍️ Sto modificando il file...")
+                                prompt = f"Istruzioni: {istruzioni}. Modifica il contenuto seguente e restituisci SOLO il risultato. "
+                                if file_name.endswith(('.xlsx', '.xls')):
+                                    prompt += "Restituisci i dati in formato CSV (es: Colonna1,Colonna2\\nValore1,Valore2)."
+                                else:
+                                    prompt += "Restituisci solo il testo aggiornato."
+                                prompt += f"\n\nContenuto:\n{contenuto}"
+                                
                                 testo_nuovo = ask_openai(chat_id, prompt)
-                                if file_name.endswith(".docx"):
+                                if file_name.endswith(('.docx', '.xlsx', '.xls', '.pdf')):
                                     crea_e_invia_file_modificato(chat_id, testo_nuovo, file_name)
+                                    send_message(chat_id, "✅ File modificato inviato!")
                                 else:
                                     send_message(chat_id, testo_nuovo)
                             else:
