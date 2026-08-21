@@ -18,42 +18,43 @@ URL = f"https://api.telegram.org/bot{TOKEN}"
 chat_histories = {}
 
 def leggi_file_da_telegram(file_id):
-    # 1. Ottiene il percorso del file dai server di Telegram
+    import io
+    import pandas as pd
+    from pypdf import PdfReader
+    from docx import Document
+    
     file_info = requests.get(f"{URL}/getFile?file_id={file_id}", timeout=10).json()
-    if not file_info.get("ok"):
-        return "Errore nel recupero del file da Telegram."
+    if not file_info.get("ok"): return "Errore nel recupero del file."
     
     file_path = file_info["result"]["file_path"]
     file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
-    
-    # 2. Scarica il file in memoria
-    file_bytes = requests.get(file_url, timeout=15).content
-    estensione = file_path.split(".")[-1].lower()
+    file_bytes = requests.get(file_url, timeout=20).content
+    ext = file_path.split(".")[-1].lower()
     
     testo_estratto = ""
     
     try:
-        if estensione == "pdf":
+        if ext == "pdf":
             reader = PdfReader(io.BytesIO(file_bytes))
-            for page in reader.pages[:15]:
-                extracted = page.extract_text()
-                if extracted:
-                    testo_estratto += extracted + "\n"
-        elif estensione in ["docx", "doc"]:
+            for page in reader.pages[:10]: # Legge le prime 10 pag
+                testo_estratto += (page.extract_text() or "") + "\n"
+        elif ext in ["docx", "doc"]:
             doc = Document(io.BytesIO(file_bytes))
-            for para in doc.paragraphs:
-                testo_estratto += para.text + "\n"
-        elif estensione in ["txt", "py", "json", "csv", "html", "md"]:
+            testo_estratto = "\n".join([p.text for p in doc.paragraphs])
+        elif ext in ["xlsx", "xls", "csv"]:
+            df = pd.read_excel(io.BytesIO(file_bytes)) if ext != 'csv' else pd.read_csv(io.BytesIO(file_bytes))
+            testo_estratto = df.to_string() # Converte la tabella in formato testo
+        elif ext in ["txt", "py", "json", "md"]:
             testo_estratto = file_bytes.decode("utf-8", errors="ignore")
         else:
-            return f"Formato .{estensione} non ancora supportato per l'estrazione del testo."
+            return f"Formato .{ext} non supportato."
     except Exception as e:
-        return f"Errore durante la lettura del file: {e}"
+        return f"Errore lettura file: {e}"
+
+    if not testo_estratto.strip():
+        return "Il file sembra vuoto o è un'immagine/scansione che non posso leggere direttamente."
         
-    if len(testo_estratto) > 15000:
-        testo_estratto = testo_estratto[:15000] + "\n[... Testo troncato perché troppo lungo ...]"
-        
-    return testo_estratto.strip()
+    return testo_estratto[:15000] # Limite sicurezza
 
 def ask_openai(chat_id, prompt):
     if chat_id not in chat_histories:
