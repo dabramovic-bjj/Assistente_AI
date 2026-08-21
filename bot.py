@@ -75,15 +75,15 @@ def leggi_file_da_telegram(file_id):
     from docx import Document
     
     # 1. Ottiene il percorso del file dai server di Telegram
-    file_info = requests.get(f"{URL}/getFile?file_id={file_id}").json()
+    file_info = requests.get(f"{URL}/getFile?file_id={file_id}", timeout=10).json()
     if not file_info.get("ok"):
         return "Errore nel recupero del file da Telegram."
     
     file_path = file_info["result"]["file_path"]
     file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
     
-    # 2. Scarica il file in memoria
-    file_bytes = requests.get(file_url).content
+    # 2. Scarica il file in memoria con timeout
+    file_bytes = requests.get(file_url, timeout=15).content
     estensione = file_path.split(".")[-1].lower()
     
     testo_estratto = ""
@@ -91,8 +91,27 @@ def leggi_file_da_telegram(file_id):
     try:
         if estensione == "pdf":
             reader = PdfReader(io.BytesIO(file_bytes))
-            for page in reader.pages:
-                testo_estratto += page.extract_text() or ""
+            # Legge massimo 15 pagine per evitare blocchi su PDF strani
+            for page in reader.pages[:15]:
+                extracted = page.extract_text()
+                if extracted:
+                    testo_estratto += extracted + "\n"
+        elif estensione in ["docx", "doc"]:
+            doc = Document(io.BytesIO(file_bytes))
+            for para in doc.paragraphs:
+                testo_estratto += para.text + "\n"
+        elif estensione in ["txt", "py", "json", "csv", "html", "md"]:
+            testo_estratto = file_bytes.decode("utf-8", errors="ignore")
+        else:
+            return f"Formato .{estensione} non ancora supportato per l'estrazione del testo."
+    except Exception as e:
+        return f"Errore durante la lettura del file: {e}"
+        
+    # Tagliamo eventuale testo troppo lungo per sicurezza (massimo 15000 caratteri)
+    if len(testo_estratto) > 15000:
+        testo_estratto = testo_estratto[:15000] + "\n[... Testo troncato perché troppo lungo ...]"
+        
+    return testo_estratto.strip()
         elif estensione in ["docx", "doc"]:
             doc = Document(io.BytesIO(file_bytes))
             for para in doc.paragraphs:
