@@ -78,17 +78,30 @@ def send_message(chat_id, text):
 def main():
     print("Bot avviato...")
     offset = None
+    processed_updates = set() # Memoria temporanea per evitare doppi invii
+    
     while True:
         try:
             updates = requests.get(f"{URL}/getUpdates", params={"timeout": 30, "offset": offset}).json()
             if "result" in updates:
                 for update in updates["result"]:
-                    offset = update["update_id"] + 1
+                    update_id = update["update_id"]
+                    
+                    # Se abbiamo già processato questo update, saltalo subito
+                    if update_id in processed_updates:
+                        continue
+                    processed_updates.add(update_id)
+                    
+                    # Puliamo la lista per non appesantire la memoria (teniamo solo gli ultimi 100)
+                    if len(processed_updates) > 100:
+                        processed_updates.pop()
+
+                    offset = update_id + 1
+                    
                     if "message" in update and "text" in update["message"]:
                         chat_id = update["message"]["chat"]["id"]
                         text = update["message"]["text"].strip()
                         
-                        # Gestione del comando /reset in memoria locale
                         if text.lower() == "/reset":
                             if chat_id in chat_histories:
                                 del chat_histories[chat_id]
