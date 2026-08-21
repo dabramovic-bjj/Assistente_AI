@@ -125,13 +125,16 @@ def main():
             updates = requests.get(f"{URL}/getUpdates", params={"timeout": 30, "offset": offset}).json()
             if "result" in updates:
                 for update in updates["result"]:
-                    if update["update_id"] in processed_updates:
-                        continue
-                    processed_updates.add(update["update_id"])
-                    if len(processed_updates) > 50:
-                        processed_updates.pop()
+                    update_id = update["update_id"]
                     
-                    offset = update["update_id"] + 1
+                    # Spostiamo subito l'offset per evitare che Telegram rimandi lo stesso update
+                    offset = update_id + 1
+                    
+                    if update_id in processed_updates:
+                        continue
+                    processed_updates.add(update_id)
+                    if len(processed_updates) > 100:
+                        processed_updates.pop()
                     
                     if "message" in update:
                         msg = update["message"]
