@@ -3,6 +3,7 @@ import time
 import requests
 import json
 import io
+import pandas as pd
 from pypdf import PdfReader
 from docx import Document
 from tavily import TavilyClient
@@ -18,11 +19,6 @@ URL = f"https://api.telegram.org/bot{TOKEN}"
 chat_histories = {}
 
 def leggi_file_da_telegram(file_id):
-    import io
-    import pandas as pd
-    from pypdf import PdfReader
-    from docx import Document
-    
     file_info = requests.get(f"{URL}/getFile?file_id={file_id}", timeout=10).json()
     if not file_info.get("ok"): return "Errore nel recupero del file."
     
@@ -32,17 +28,15 @@ def leggi_file_da_telegram(file_id):
     ext = file_path.split(".")[-1].lower()
     
     testo_estratto = ""
-    
     try:
         if ext == "pdf":
             reader = PdfReader(io.BytesIO(file_bytes))
-            for page in reader.pages[:10]: # Legge le prime 10 pag
+            for page in reader.pages[:10]:
                 testo_estratto += (page.extract_text() or "") + "\n"
         elif ext in ["docx", "doc"]:
             doc = Document(io.BytesIO(file_bytes))
             testo_estratto = "\n".join([p.text for p in doc.paragraphs])
         elif ext in ["xlsx", "xls"]:
-            # Legge tutti i fogli del file Excel
             xls = pd.ExcelFile(io.BytesIO(file_bytes))
             for sheet_name in xls.sheet_names:
                 df = pd.read_excel(xls, sheet_name=sheet_name, nrows=50)
@@ -56,55 +50,20 @@ def leggi_file_da_telegram(file_id):
             return f"Formato .{ext} non supportato."
     except Exception as e:
         return f"Errore lettura file: {e}"
-
-    if not testo_estratto.strip():
-        return "Il file sembra vuoto o è un'immagine/scansione che non posso leggere direttamente."
-        
-    return testo_estratto[:15000] # Limite sicurezza
+    return testo_estratto[:15000]
 
 def ask_openai(chat_id, prompt):
     if chat_id not in chat_histories:
-        chat_histories[chat_id] = [
-            {"role": "system", "content": "Sei un assistente virtuale utile e intelligente. Oggi è il 21 agosto 2026."}
-        ]
-    
+        chat_histories[chat_id] = [{"role": "system", "content": "Sei un assistente virtuale utile e intelligente. Oggi è il 21 agosto 2026."}]
     chat_histories[chat_id].append({"role": "user", "content": prompt})
-
-    check_headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-    check_data = {
-        "model": "gpt-4o-mini",
-        "messages": [
-            {"role": "system", "content": "Rispondi SOLO con 'SI' se la domanda richiede informazioni in tempo reale (notizie, prezzi, meteo), altrimenti 'NO'."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0
-    }
     
-    needs_search = False
-    try:
-        check_res = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=check_data, timeout=10)
-        if "SI" in check_res.json()["choices"][0]["message"]["content"].strip().upper():
-            needs_search = True
-    except:
-        pass
-
-    current_messages = list(chat_histories[chat_id])
-    if needs_search:
-        try:
-            search_response = tavily.search(query=prompt, search_depth="advanced", max_results=3)
-            context = "Fonti web (2026):\n" + "\n".join([f"- {r['title']}: {r['content']}" for r in search_response.get("results", [])])
-            current_messages.insert(1, {"role": "system", "content": context})
-        except:
-            pass
-
-    data = {"model": "gpt-4o-mini", "messages": current_messages}
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    data = {"model": "gpt-4o-mini", "messages": chat_histories[chat_id]}
     
     try:
-        response = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=data, timeout=30)
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=30)
         reply = response.json()["choices"][0]["message"]["content"]
         chat_histories[chat_id].append({"role": "assistant", "content": reply})
-        if len(chat_histories[chat_id]) > 16:
-            chat_histories[chat_id] = [chat_histories[chat_id][0]] + chat_histories[chat_id][-15:]
         return reply
     except Exception as e:
         return f"Errore: {e}"
@@ -112,58 +71,54 @@ def ask_openai(chat_id, prompt):
 def send_message(chat_id, text):
     try:
         requests.post(f"{URL}/sendMessage", json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}, timeout=10)
-    except:
-        pass
+    except: pass
+
+def crea_e_invia_file_modificato(chat_id, testo_modificato, nome_originale):
+    doc = Document()
+    doc.add_paragraph(testo_modificato)
+    nuovo_nome = f"modificato_{nome_originale.replace('.docx', '')}.docx"
+    doc.save(nuovo_nome)
+    with open(nuovo_nome, 'rb') as f:
+        requests.post(f"{URL}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
 
 def main():
     print("Bot avviato...")
     offset = None
     processed_updates = set()
-    
     while True:
         try:
             updates = requests.get(f"{URL}/getUpdates", params={"timeout": 30, "offset": offset}).json()
             if "result" in updates:
                 for update in updates["result"]:
-                    update_id = update["update_id"]
-                    
-                    # Spostiamo subito l'offset per evitare che Telegram rimandi lo stesso update
-                    offset = update_id + 1
-                    
-                    if update_id in processed_updates:
-                        continue
-                    processed_updates.add(update_id)
-                    if len(processed_updates) > 100:
-                        processed_updates.pop()
+                    offset = update["update_id"] + 1
+                    if update["update_id"] in processed_updates: continue
+                    processed_updates.add(update["update_id"])
                     
                     if "message" in update:
                         msg = update["message"]
                         chat_id = msg["chat"]["id"]
-                        
                         if "document" in msg:
-                            send_message(chat_id, "📥 File ricevuto, lo sto analizzando...")
                             file_id = msg["document"]["file_id"]
                             file_name = msg["document"].get("file_name", "documento")
-                            contenuto_file = leggi_file_da_telegram(file_id)
+                            istruzioni = msg.get("caption", "")
+                            contenuto = leggi_file_da_telegram(file_id)
                             
-                            if "Errore" in contenuto_file or "non ancora supportato" in contenuto_file:
-                                send_message(chat_id, contenuto_file)
+                            if istruzioni:
+                                send_message(chat_id, "✍️ Sto modificando il documento...")
+                                prompt = f"Istruzioni: {istruzioni}. Modifica il testo seguente e restituisci solo il testo aggiornato:\n\n{contenuto}"
+                                testo_nuovo = ask_openai(chat_id, prompt)
+                                if file_name.endswith(".docx"):
+                                    crea_e_invia_file_modificato(chat_id, testo_nuovo, file_name)
+                                else:
+                                    send_message(chat_id, testo_nuovo)
                             else:
-                                prompt_analisi = f"Analizza il seguente documento ({file_name}). Estrai i dati chiave, fai una sintesi dettagliata e crea un report strutturato:\n\n{contenuto_file}"
-                                reply = ask_openai(chat_id, prompt_analisi)
+                                send_message(chat_id, "📥 Analizzo il file...")
+                                reply = ask_openai(chat_id, f"Analizza questo file ({file_name}) e crea un report:\n\n{contenuto}")
                                 send_message(chat_id, reply)
-                                
                         elif "text" in msg:
-                            text = msg["text"].strip()
-                            if text.lower() == "/reset":
-                                if chat_id in chat_histories:
-                                    del chat_histories[chat_id]
-                                send_message(chat_id, "Memoria locale resettata con successo!")
-                            else:
-                                reply = ask_openai(chat_id, text)
-                                send_message(chat_id, reply)
-        except:
-            time.sleep(3)
+                            reply = ask_openai(chat_id, msg["text"])
+                            send_message(chat_id, reply)
+        except: time.sleep(3)
 
 if __name__ == "__main__":
     main()
