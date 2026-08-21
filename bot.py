@@ -129,13 +129,7 @@ def main():
                         chat_id = update["message"]["chat"]["id"]
                         text = update["message"]["text"].strip()
                         
-                        if text.lower() == "/reset":
-                            try:
-                                supabase.table("memoria").delete().eq("user_id", str(chat_id)).execute()
-                                send_message(chat_id, "Memoria resettata con successo.")
-                            except Exception as e:
-                                send_message(chat_id, f"Errore reset: {e}")
-                        elif any(k in text.lower() for k in ["ho comprato", "ho acquistato"]):
+                        if any(k in text.lower() for k in ["ho comprato", "ho acquistato"]):
                             send_message(chat_id, gestisci_portafoglio(chat_id, text))
                         else:
                             send_message(chat_id, ask_openai(chat_id, text))
