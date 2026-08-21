@@ -28,7 +28,7 @@ def leggi_file_da_telegram(file_id, file_name):
     try:
         if ext == "pdf":
             reader = PdfReader(io.BytesIO(file_bytes))
-            for page in reader.pages[:20]: # Legge fino a 20 pagine per report completi
+            for page in reader.pages[:20]:
                 testo_estratto += (page.extract_text() or "") + "\n"
         elif ext in ["docx", "doc"]:
             doc = Document(io.BytesIO(file_bytes))
@@ -44,7 +44,7 @@ def leggi_file_da_telegram(file_id, file_name):
         elif ext in ["txt", "py", "json", "md", "html"]:
             testo_estratto = file_bytes.decode("utf-8", errors="ignore")
         else:
-            return f"Formato .{ext} supportato solo parzialmente o non riconosciuto."
+            return f"Formato .{ext} supportato solo parzialmente."
     except Exception as e:
         return f"Errore lettura file: {e}"
     
@@ -81,14 +81,13 @@ def crea_e_invia_docx_modificato(chat_id, testo_modificato, nome_originale):
 
 def send_message(chat_id, text):
     try:
-        # Suddivide i messaggi troppo lunghi per rispettare i limiti di Telegram
         for i in range(0, len(text), 4000):
             requests.post(f"{URL}/sendMessage", json={"chat_id": chat_id, "text": text[i:i+4000]}, timeout=10)
     except: 
         pass
 
 def main():
-    print("Bot avviato (Analisi universale & Report Word)...")
+    print("Bot avviato e operativo...")
     offset = None
     while True:
         try:
@@ -98,10 +97,13 @@ def main():
                 msg = update.get("message", {})
                 chat_id = msg.get("chat", {}).get("id")
                 
+                if not chat_id:
+                    continue
+                
                 if "document" in msg:
                     file_name = msg["document"].get("file_name", "documento")
                     pending_files[chat_id] = msg["document"]
-                    send_message(chat_id, f"📂 File '{file_name}' ricevuto! Cosa desideri fare? (es: 'Estrai i dati di sintesi e crea un report', 'Analizza le tabelle', oppure 'Modifica il documento...')")
+                    send_message(chat_id, f"📂 File '{file_name}' ricevuto! Scrivi cosa vuoi fare (es: 'Genera un report in Word' o 'Analizzalo').")
                 
                 elif "text" in msg:
                     text = msg["text"]
@@ -112,19 +114,23 @@ def main():
                         send_message(chat_id, "🔍 Analizzo il file e genero i contenuti...")
                         contenuto = leggi_file_da_telegram(file_info["file_id"], file_name)
                         
-                        # Se l'utente chiede un report, una modifica o la creazione di un documento
                         if any(parola in text.lower() for parola in ["modifica", "report", "crea", "scrivi", "genera", "sintesi"]):
                             prompt = f"Istruzioni utente: {text}. Analizza il seguente contenuto estratto, estrapola i dati chiave e genera un report dettagliato/testo aggiornato. Restituisci SOLO il testo finale:\n\n{contenuto}"
                             risultato = ask_openai(chat_id, prompt)
                             crea_e_invia_docx_modificato(chat_id, risultato, file_name)
-                            send_message(chat_id, "✅ Ecco il file Word con il report/modifica richiesti!")
+                            send_message(chat_id, "✅ Ecco il file Word con il report richiesto!")
                         else:
                             prompt = f"{text}:\n\n{contenuto}"
                             risultato = ask_openai(chat_id, prompt)
                             send_message(chat_id, risultato)
+                            
                     elif text == "/reset":
                         chat_histories.pop(chat_id, None)
                         send_message(chat_id, "Memoria resettata.")
+                        
+                    else:
+                        risultato = ask_openai(chat_id, text)
+                        send_message(chat_id, risultato)
         except Exception as e:
             print(f"Errore nel ciclo principale: {e}")
             time.sleep(3)
