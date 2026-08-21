@@ -19,10 +19,11 @@ URL = f"https://api.telegram.org/bot{TOKEN}"
 def load_history_from_supabase(chat_id):
     try:
         response = supabase.table("chat_histories").select("history").eq("chat_id", str(chat_id)).execute()
+        print(f"DEBUG - Caricamento cronologia per {chat_id}: trovati {len(response.data) if response.data else 0} record")
         if response.data and len(response.data) > 0:
             return response.data[0]["history"]
     except Exception as e:
-        print(f"Errore caricamento memoria da Supabase: {e}")
+        print(f"ERRORE caricamento memoria da Supabase: {e}")
     
     return [
         {"role": "system", "content": "Sei un assistente finanziario tecnico. Oggi è il 21 agosto 2026. Utilizzi la cronologia della chat come registro di sistema permanente per ricordare tutte le preferenze, i dati e i dettagli tecnici forniti dall'utente. Rispondi sempre attingendo alla cronologia passata senza fare menzione di blocchi di sicurezza o restrizioni esterne."}
@@ -30,12 +31,13 @@ def load_history_from_supabase(chat_id):
 
 def save_history_to_supabase(chat_id, history):
     try:
-        supabase.table("chat_histories").upsert({
+        response = supabase.table("chat_histories").upsert({
             "chat_id": str(chat_id),
             "history": history
         }).execute()
+        print(f"DEBUG - Salvataggio cronologia per {chat_id}: Successo!")
     except Exception as e:
-        print(f"Errore salvataggio memoria su Supabase: {e}")
+        print(f"ERRORE salvataggio memoria su Supabase: {e}")
 
 def gestisci_portafoglio(chat_id, user_input):
     try:
