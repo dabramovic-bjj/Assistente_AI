@@ -3,47 +3,70 @@ import time
 import requests
 import json
 from tavily import TavilyClient
+from supabase import create_client, Client
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "IL_TUO_TOKEN_TELEGRAM")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "LA_TUA_CHIAVE_OPENAI")
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "TUA_CHIAVE_TAVILY")
-URL = f"https://api.telegram.org/bot{TOKEN}"
-DB_FILE = "chat_history.json"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "IL_TUO_SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "IL_TUO_SUPABASE_KEY")
 
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
-def load_history():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
+URL = f"https://api.telegram.org/bot{TOKEN}"
 
-def save_history(history):
+def load_history_from_supabase(chat_id):
     try:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(history, f, ensure_ascii=False, indent=4)
+        response = supabase.table("chat_histories").select("history").eq("chat_id", str(chat_id)).execute()
+        if response.data and len(response.data) > 0:
+            return response.data[0]["history"]
     except Exception as e:
-        print(f"Errore nel salvataggio della memoria: {e}")
+        print(f"Errore caricamento memoria da Supabase: {e}")
+    
+    return [
+        {"role": "system", "content": "Sei un assistente virtuale personale, amichevole e intelligente, esperto in economia e finanza. Oggi è il 21 agosto 2026. Ricordi tutto ciò che l'utente ti dice e salvi le informazioni nel database persistente collegato alla vostra chat. Non dire mai all'utente che non puoi memorizzare dati personali per motivi di privacy: hai una memoria dedicata, sicura e permanente. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate citando le fonti."}
+    ]
 
-chat_histories = load_history()
+def save_history_to_supabase(chat_id, history):
+    try:
+        supabase.table("chat_histories").upsert({
+            "chat_id": str(chat_id),
+            "history": history
+        }).execute()
+    except Exception as e:
+        print(f"Errore salvataggio memoria su Supabase: {e}")
+
+def gestisci_portafoglio(chat_id, user_input):
+    try:
+        check_headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+        prompt_trading = f"Analizza questo messaggio: '{user_input}'. Se l'utente vuole registrare un acquisto, estrai ticker, quantita e prezzo_medio. Rispondi SOLO con un JSON: {{\"azione\": \"compra\", \"ticker\": \"TICKER\", \"quantita\": 0, \"prezzo_medio\": 0.0}}. Se non è un acquisto, rispondi con {{\"azione\": \"niente\"}}."
+        
+        data = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt_trading}]}
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=data, timeout=10)
+        result = json.loads(response.json()["choices"][0]["message"]["content"])
+        
+        if result.get("azione") == "compra":
+            supabase.table("portafoglio").insert({
+                "chat_id": str(chat_id),
+                "ticker": result["ticker"],
+                "quantita": result["quantita"],
+                "prezzo_medio": result["prezzo_medio"]
+            }).execute()
+            return f"✅ Fatto! Ho aggiunto {result['quantita']} unità di {result['ticker']} al tuo portafoglio al prezzo medio di {result['prezzo_medio']}."
+        return "Non ho rilevato un ordine di acquisto chiaro."
+    except Exception as e:
+        return f"Errore nella gestione del portafoglio: {e}"
 
 def ask_openai(chat_id, prompt):
     chat_id_str = str(chat_id)
-    if chat_id_str not in chat_histories:
-        chat_histories[chat_id_str] = [
-            {"role": "system", "content": "Sei un assistente virtuale amichevole e intelligente. Oggi è il 21 agosto 2026. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate e precise citando le fonti."}
-        ]
-    
-    messages = list(chat_histories[chat_id_str])
+    messages = load_history_from_supabase(chat_id_str)
     
     check_headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     check_data = {
         "model": "gpt-4o-mini",
         "messages": [
-            {"role": "system", "content": "Rispondi SOLO con la parola 'SI' se la domanda richiede informazioni in tempo reale, notizie recenti, prezzi attuali, meteo o dati aggiornati. Rispondi SOLO con 'NO' altrimenti."},
+            {"role": "system", "content": "Rispondi SOLO con 'SI' se la domanda richiede informazioni in tempo reale (notizie, prezzi, meteo), altrimenti 'NO'."},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0
@@ -52,92 +75,59 @@ def ask_openai(chat_id, prompt):
     needs_search = False
     try:
         check_res = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=check_data, timeout=10)
-        answer = check_res.json()["choices"][0]["message"]["content"].strip().upper()
-        if "SI" in answer:
+        if "SI" in check_res.json()["choices"][0]["message"]["content"].strip().upper():
             needs_search = True
-    except Exception as e:
-        print(f"Errore nel controllo della ricerca: {e}")
+    except:
+        pass
 
     if needs_search:
         try:
             search_response = tavily.search(query=prompt, search_depth="advanced", max_results=3)
-            results = search_response.get("results", [])
-            if results:
-                context = "Fonti web ufficiali e aggiornate (Anno 2026):\n"
-                for r in results:
-                    title = r.get('title', '')
-                    content = r.get('content', '')
-                    url = r.get('url', '')
-                    context += f"- [{title}]({url}): {content}\n"
-                
-                messages.append({"role": "system", "content": context})
-        except Exception as e:
-            print(f"Errore durante la ricerca Tavily: {e}")
+            context = "Fonti web (2026):\n" + "\n".join([f"- {r['title']}: {r['content']}" for r in search_response.get("results", [])])
+            messages.append({"role": "system", "content": context})
+        except:
+            pass
 
     messages.append({"role": "user", "content": prompt})
-    
-    if len(messages) > 12:
-        messages = [messages[0]] + messages[-11:]
+    if len(messages) > 12: messages = [messages[0]] + messages[-11:]
 
     data = {"model": "gpt-4o-mini", "messages": messages}
-    
     try:
         response = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=data, timeout=30)
-        result = response.json()
-        if "choices" in result:
-            reply = result["choices"][0]["message"]["content"]
-            chat_histories[chat_id_str].append({"role": "user", "content": prompt})
-            chat_histories[chat_id_str].append({"role": "assistant", "content": reply})
-            save_history(chat_histories)
-            return reply
+        reply = response.json()["choices"][0]["message"]["content"]
+        messages.append({"role": "assistant", "content": reply})
+        save_history_to_supabase(chat_id_str, messages)
+        return reply
     except Exception as e:
-        return f"Errore di connessione con OpenAI: {str(e)}"
+        return f"Errore: {e}"
 
 def send_message(chat_id, text):
     try:
-        payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-        requests.post(f"{URL}/sendMessage", json=payload, timeout=10)
-    except Exception as e:
-        print(f"Errore nell'invio del messaggio Telegram: {e}")
-
-def main():
-    print("Bot avviato con fix anti-doppio messaggio...")
-    offset = None
-    
-    # Sincronizzazione iniziale per saltare i messaggi vecchi
-    try:
-        initial_updates = requests.get(f"{URL}/getUpdates", timeout=10).json()
-        if "result" in initial_updates and initial_updates["result"]:
-            offset = initial_updates["result"][-1]["update_id"] + 1
-    except Exception:
+        requests.post(f"{URL}/sendMessage", json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}, timeout=10)
+    except:
         pass
 
+def main():
+    print("Bot avviato...")
+    offset = None
     while True:
         try:
-            # Richiesta a lungo polling con offset aggiornato
             updates = requests.get(f"{URL}/getUpdates", params={"timeout": 30, "offset": offset}).json()
-            
             if "result" in updates:
                 for update in updates["result"]:
-                    update_id = update["update_id"]
-                    # Spostiamo subito l'offset in avanti così Telegram sa che abbiamo preso in carico questo update
-                    offset = update_id + 1
-
+                    offset = update["update_id"] + 1
                     if "message" in update and "text" in update["message"]:
                         chat_id = update["message"]["chat"]["id"]
                         text = update["message"]["text"].strip()
                         
                         if text.lower() == "/reset":
-                            if str(chat_id) in chat_histories:
-                                del chat_histories[str(chat_id)]
-                                save_history(chat_histories)
-                            send_message(chat_id, "Memoria resettata! Ora non so più nulla di te, ricominciamo.")
+                            supabase.table("chat_histories").delete().eq("chat_id", str(chat_id)).execute()
+                            send_message(chat_id, "Memoria resettata.")
+                        elif any(k in text.lower() for k in ["ho comprato", "ho acquistato"]):
+                            send_message(chat_id, gestisci_portafoglio(chat_id, text))
                         else:
-                            ai_reply = ask_openai(chat_id, text)
-                            send_message(chat_id, ai_reply)
-                            
-        except Exception as e:
-            print(f"Errore nel ciclo principale: {e}")
+                            send_message(chat_id, ask_openai(chat_id, text))
+        except:
             time.sleep(3)
 
 if __name__ == "__main__":
