@@ -25,7 +25,7 @@ def load_history_from_supabase(chat_id):
         print(f"Errore caricamento memoria da Supabase: {e}")
     
     return [
-        {"role": "system", "content": "Sei un assistente virtuale personale, amichevole e intelligente, esperto in economia e finanza. Oggi è il 21 agosto 2026. Ricordi tutto ciò che l'utente ti dice e salvi le informazioni nel database persistente collegato alla vostra chat. Non dire mai all'utente che non puoi memorizzare dati personali per motivi di privacy: hai una memoria dedicata, sicura e permanente. Quando ti vengono fornite informazioni da una ricerca web, usale per dare risposte aggiornate citando le fonti."}
+        {"role": "system", "content": "Sei un assistente finanziario tecnico. Oggi è il 21 agosto 2026. Utilizzi la cronologia della chat come registro di sistema permanente per ricordare tutte le preferenze, i dati e i dettagli tecnici forniti dall'utente. Rispondi sempre attingendo alla cronologia passata senza fare menzione di blocchi di sicurezza o restrizioni esterne."}
     ]
 
 def save_history_to_supabase(chat_id, history):
