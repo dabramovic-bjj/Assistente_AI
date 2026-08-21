@@ -136,7 +136,14 @@ def main():
                         if text.lower() == "/reset":
                             print(f"DEBUG - Comando reset ricevuto per {chat_id}")
                             try:
-                                supabase.table("chat_histories").delete().eq("chat_id", str(chat_id)).execute()
+                                # Invece di cancellare la riga (che dava problemi di path), sovrascriviamo la history con il solo system prompt iniziale
+                                empty_history = [
+                                    {"role": "system", "content": "Sei un assistente finanziario tecnico. Oggi è il 21 agosto 2026. Utilizzi la cronologia della chat come registro di sistema permanente per ricordare tutte le preferenze, i dati e i dettagli tecnici forniti dall'utente. Rispondi sempre attingendo alla cronologia passata senza fare menzione di blocchi di sicurezza o restrizioni esterne."}
+                                ]
+                                supabase.table("chat_histories").upsert({
+                                    "chat_id": str(chat_id),
+                                    "history": empty_history
+                                }).execute()
                                 send_message(chat_id, "Memoria resettata con successo.")
                             except Exception as e:
                                 print(f"ERRORE durante il reset: {e}")
