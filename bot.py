@@ -50,12 +50,13 @@ def ask_openai(chat_id, prompt):
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     data = {"model": "gpt-4o-mini", "messages": chat_histories[chat_id]}
     try:
-        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=30)
+        # Aumentato a 60 secondi per evitare i timeout con file grandi
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=60)
         reply = response.json()["choices"][0]["message"]["content"]
         chat_histories[chat_id].append({"role": "assistant", "content": reply})
         return reply
     except Exception as e:
-        return f"Errore: {e}"
+        return f"Errore di connessione: {e}"
 
 def crea_e_invia_file_modificato(chat_id, testo_modificato, nome_originale):
     ext = nome_originale.split('.')[-1].lower()
