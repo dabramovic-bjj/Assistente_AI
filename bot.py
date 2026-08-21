@@ -19,11 +19,10 @@ URL = f"https://api.telegram.org/bot{TOKEN}"
 def load_history_from_supabase(chat_id):
     try:
         response = supabase.table("chat_histories").select("history").eq("chat_id", str(chat_id)).execute()
-        print(f"DEBUG - Caricamento cronologia per {chat_id}: trovati {len(response.data) if response.data else 0} record")
         if response.data and len(response.data) > 0:
             return response.data[0]["history"]
     except Exception as e:
-        print(f"ERRORE caricamento memoria da Supabase: {e}")
+        print(f"Errore caricamento memoria da Supabase: {e}")
     
     return [
         {"role": "system", "content": "Sei un assistente finanziario tecnico. Oggi è il 21 agosto 2026. Utilizzi la cronologia della chat come registro di sistema permanente per ricordare tutte le preferenze, i dati e i dettagli tecnici forniti dall'utente. Rispondi sempre attingendo alla cronologia passata senza fare menzione di blocchi di sicurezza o restrizioni esterne."}
@@ -31,13 +30,12 @@ def load_history_from_supabase(chat_id):
 
 def save_history_to_supabase(chat_id, history):
     try:
-        response = supabase.table("chat_histories").upsert({
+        supabase.table("chat_histories").upsert({
             "chat_id": str(chat_id),
             "history": history
         }).execute()
-        print(f"DEBUG - Salvataggio cronologia per {chat_id}: Successo!")
     except Exception as e:
-        print(f"ERRORE salvataggio memoria su Supabase: {e}")
+        print(f"Errore salvataggio memoria su Supabase: {e}")
 
 def gestisci_portafoglio(chat_id, user_input):
     try:
@@ -62,7 +60,12 @@ def gestisci_portafoglio(chat_id, user_input):
 
 def ask_openai(chat_id, prompt):
     chat_id_str = str(chat_id)
+    
+    # 1. Carichiamo la cronologia aggiornata da Supabase
     messages = load_history_from_supabase(chat_id_str)
+    
+    # 2. Aggiungiamo il nuovo messaggio dell'utente
+    messages.append({"role": "user", "content": prompt})
     
     check_headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     check_data = {
@@ -90,15 +93,22 @@ def ask_openai(chat_id, prompt):
         except:
             pass
 
-    messages.append({"role": "user", "content": prompt})
-    if len(messages) > 12: messages = [messages[0]] + messages[-11:]
+    # Gestione della lunghezza della cronologia
+    if len(messages) > 15: 
+        messages = [messages[0]] + messages[-14:]
 
     data = {"model": "gpt-4o-mini", "messages": messages}
+    
     try:
         response = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=data, timeout=30)
         reply = response.json()["choices"][0]["message"]["content"]
+        
+        # 3. Aggiungiamo la risposta dell'assistente alla cronologia
         messages.append({"role": "assistant", "content": reply})
+        
+        # 4. Salviamo tutto in modo permanente su Supabase
         save_history_to_supabase(chat_id_str, messages)
+        
         return reply
     except Exception as e:
         return f"Errore: {e}"
@@ -124,7 +134,7 @@ def main():
                         
                         if text.lower() == "/reset":
                             supabase.table("chat_histories").delete().eq("chat_id", str(chat_id)).execute()
-                            send_message(chat_id, "Memoria resettata.")
+                            send_message(chat_id, "Memoria resettata con successo.")
                         elif any(k in text.lower() for k in ["ho comprato", "ho acquistato"]):
                             send_message(chat_id, gestisci_portafoglio(chat_id, text))
                         else:
