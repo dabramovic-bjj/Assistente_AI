@@ -2,8 +2,12 @@ import os
 import time
 import requests
 import json
+import io
+from pypdf import PdfReader
+from docx import Document
 from tavily import TavilyClient
 
+# Configurazione
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "IL_TUO_TOKEN_TELEGRAM")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "LA_TUA_CHIAVE_OPENAI")
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "TUA_CHIAVE_TAVILY")
@@ -12,6 +16,44 @@ tavily = TavilyClient(api_key=TAVILY_API_KEY)
 URL = f"https://api.telegram.org/bot{TOKEN}"
 
 chat_histories = {}
+
+def leggi_file_da_telegram(file_id):
+    # 1. Ottiene il percorso del file dai server di Telegram
+    file_info = requests.get(f"{URL}/getFile?file_id={file_id}", timeout=10).json()
+    if not file_info.get("ok"):
+        return "Errore nel recupero del file da Telegram."
+    
+    file_path = file_info["result"]["file_path"]
+    file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+    
+    # 2. Scarica il file in memoria
+    file_bytes = requests.get(file_url, timeout=15).content
+    estensione = file_path.split(".")[-1].lower()
+    
+    testo_estratto = ""
+    
+    try:
+        if estensione == "pdf":
+            reader = PdfReader(io.BytesIO(file_bytes))
+            for page in reader.pages[:15]:
+                extracted = page.extract_text()
+                if extracted:
+                    testo_estratto += extracted + "\n"
+        elif estensione in ["docx", "doc"]:
+            doc = Document(io.BytesIO(file_bytes))
+            for para in doc.paragraphs:
+                testo_estratto += para.text + "\n"
+        elif estensione in ["txt", "py", "json", "csv", "html", "md"]:
+            testo_estratto = file_bytes.decode("utf-8", errors="ignore")
+        else:
+            return f"Formato .{estensione} non ancora supportato per l'estrazione del testo."
+    except Exception as e:
+        return f"Errore durante la lettura del file: {e}"
+        
+    if len(testo_estratto) > 15000:
+        testo_estratto = testo_estratto[:15000] + "\n[... Testo troncato perché troppo lungo ...]"
+        
+    return testo_estratto.strip()
 
 def ask_openai(chat_id, prompt):
     if chat_id not in chat_histories:
@@ -53,12 +95,9 @@ def ask_openai(chat_id, prompt):
     try:
         response = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=data, timeout=30)
         reply = response.json()["choices"][0]["message"]["content"]
-        
         chat_histories[chat_id].append({"role": "assistant", "content": reply})
-        
         if len(chat_histories[chat_id]) > 16:
             chat_histories[chat_id] = [chat_histories[chat_id][0]] + chat_histories[chat_id][-15:]
-            
         return reply
     except Exception as e:
         return f"Errore: {e}"
@@ -69,83 +108,32 @@ def send_message(chat_id, text):
     except:
         pass
 
-def leggi_file_da_telegram(file_id):
-    import io
-    from pypdf import PdfReader
-    from docx import Document
-    
-    # 1. Ottiene il percorso del file dai server di Telegram
-    file_info = requests.get(f"{URL}/getFile?file_id={file_id}", timeout=10).json()
-    if not file_info.get("ok"):
-        return "Errore nel recupero del file da Telegram."
-    
-    file_path = file_info["result"]["file_path"]
-    file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
-    
-    # 2. Scarica il file in memoria con timeout
-    file_bytes = requests.get(file_url, timeout=15).content
-    estensione = file_path.split(".")[-1].lower()
-    
-    testo_estratto = ""
-    
-    try:
-        if estensione == "pdf":
-            reader = PdfReader(io.BytesIO(file_bytes))
-            # Legge massimo 15 pagine per evitare blocchi su PDF strani
-            for page in reader.pages[:15]:
-                extracted = page.extract_text()
-                if extracted:
-                    testo_estratto += extracted + "\n"
-        elif estensione in ["docx", "doc"]:
-            doc = Document(io.BytesIO(file_bytes))
-            for para in doc.paragraphs:
-                testo_estratto += para.text + "\n"
-        elif estensione in ["txt", "py", "json", "csv", "html", "md"]:
-            testo_estratto = file_bytes.decode("utf-8", errors="ignore")
-        else:
-            return f"Formato .{estensione} non ancora supportato per l'estrazione del testo."
-    except Exception as e:
-        return f"Errore durante la lettura del file: {e}"
-        
-    # Tagliamo eventuale testo troppo lungo per sicurezza (massimo 15000 caratteri)
-    if len(testo_estratto) > 15000:
-        testo_estratto = testo_estratto[:15000] + "\n[... Testo troncato perché troppo lungo ...]"
-        
-    return testo_estratto.strip()
-        elif estensione in ["docx", "doc"]:
-            doc = Document(io.BytesIO(file_bytes))
-            for para in doc.paragraphs:
-                testo_estratto += para.text + "\n"
-        elif estensione in ["txt", "py", "json", "csv", "html", "md"]:
-            testo_estratto = file_bytes.decode("utf-8", errors="ignore")
-        else:
-            return f"Formato .{estensione} non ancora supportato per l'estrazione del testo."
-    except Exception as e:
-        return f"Errore durante la lettura del file: {e}"
-        
-    return testo_estratto
-
 def main():
     print("Bot avviato...")
     offset = None
+    processed_updates = set()
     
     while True:
         try:
             updates = requests.get(f"{URL}/getUpdates", params={"timeout": 30, "offset": offset}).json()
             if "result" in updates:
                 for update in updates["result"]:
+                    if update["update_id"] in processed_updates:
+                        continue
+                    processed_updates.add(update["update_id"])
+                    if len(processed_updates) > 50:
+                        processed_updates.pop()
+                    
                     offset = update["update_id"] + 1
                     
                     if "message" in update:
                         msg = update["message"]
                         chat_id = msg["chat"]["id"]
                         
-                        # CASO 1: L'utente invia un documento (PDF, Word, TXT, ecc.)
                         if "document" in msg:
                             send_message(chat_id, "📥 File ricevuto, lo sto analizzando...")
                             file_id = msg["document"]["file_id"]
                             file_name = msg["document"].get("file_name", "documento")
-                            
                             contenuto_file = leggi_file_da_telegram(file_id)
                             
                             if "Errore" in contenuto_file or "non ancora supportato" in contenuto_file:
@@ -155,10 +143,8 @@ def main():
                                 reply = ask_openai(chat_id, prompt_analisi)
                                 send_message(chat_id, reply)
                                 
-                        # CASO 2: L'utente invia un normale messaggio di testo
                         elif "text" in msg:
                             text = msg["text"].strip()
-                            
                             if text.lower() == "/reset":
                                 if chat_id in chat_histories:
                                     del chat_histories[chat_id]
