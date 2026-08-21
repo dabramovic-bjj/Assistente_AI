@@ -1,4 +1,4 @@
 requests
 tavily-python
-PyPDF2
+pypdf
 python-docx
