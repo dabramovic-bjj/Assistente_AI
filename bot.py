@@ -77,33 +77,56 @@ def send_message(chat_id, text):
 def crea_e_invia_file_modificato(chat_id, testo_modificato, nome_originale):
     ext = nome_originale.split('.')[-1].lower()
     base_name = nome_originale.rsplit('.', 1)[0]
+    
+    # Pulizia del nome file per evitare caratteri strani
+    base_name = "".join([c for c in base_name if c.isalnum() or c in (' ', '_', '-')]).strip()
+    
     path = ""
-    
-    if ext in ['docx', 'doc']:
-        doc = Document()
-        doc.add_paragraph(testo_modificato)
-        path = f"modificato_{base_name}.docx"
-        doc.save(path)
-    elif ext in ['xlsx', 'xls']:
-        try:
-            df = pd.read_csv(io.StringIO(testo_modificato))
-            path = f"modificato_{base_name}.xlsx"
-            df.to_excel(path, index=False)
-        except:
-            send_message(chat_id, "Errore nella creazione Excel. Assicurati che l'IA abbia fornito dati in formato tabella/CSV.")
+    try:
+        if ext in ['docx', 'doc']:
+            doc = Document()
+            doc.add_paragraph(testo_modificato)
+            path = f"modificato_{base_name}.docx"
+            doc.save(path)
+        
+        elif ext in ['xlsx', 'xls']:
+            try:
+                # Forza il formato csv se l'IA risponde con testo
+                import csv
+                from io import StringIO
+                f = StringIO(testo_modificato)
+                reader = csv.reader(f)
+                data = list(reader)
+                df = pd.DataFrame(data[1:], columns=data[0])
+                path = f"modificato_{base_name}.xlsx"
+                df.to_excel(path, index=False)
+            except Exception as e:
+                send_message(chat_id, f"Errore Excel: {str(e)}")
+                return
+        
+        elif ext == 'pdf':
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            # Gestione caratteri speciali
+            testo_pulito = testo_modificato.encode('latin-1', 'replace').decode('latin-1')
+            for line in testo_pulito.split('\n'):
+                pdf.cell(200, 10, txt=line, ln=True)
+            path = f"modificato_{base_name}.pdf"
+            pdf.output(path)
+        else:
+            send_message(chat_id, f"Formato .{ext} non gestito per la creazione file.")
             return
-    elif ext == 'pdf':
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        testo_pulito = testo_modificato.encode('latin-1', 'replace').decode('latin-1')
-        for line in testo_pulito.split('\n'):
-            pdf.cell(200, 10, txt=line, ln=True)
-        path = f"modificato_{base_name}.pdf"
-        pdf.output(path)
-    
-    with open(path, 'rb') as f:
-        requests.post(f"{URL}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
+
+        # Invio finale
+        if path and os.path.exists(path):
+            with open(path, 'rb') as f:
+                requests.post(f"{URL}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
+        else:
+            send_message(chat_id, "Errore: il file non è stato creato correttamente.")
+            
+    except Exception as e:
+        send_message(chat_id, f"Errore critico nella creazione del file: {str(e)}")
 
 def main():
     print("Bot avviato...")
