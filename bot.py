@@ -72,36 +72,17 @@ def send_message(chat_id, text):
 def main():
     print("Bot avviato...")
     offset = None
-    processed_updates = set()
-    last_messages = {} # Dizionario per tracciare l'ultimo messaggio e bloccare i doppi invii
     
     while True:
         try:
             updates = requests.get(f"{URL}/getUpdates", params={"timeout": 30, "offset": offset}).json()
             if "result" in updates:
                 for update in updates["result"]:
-                    update_id = update["update_id"]
-                    
-                    if update_id in processed_updates:
-                        continue
-                    processed_updates.add(update_id)
-                    if len(processed_updates) > 100:
-                        processed_updates.pop()
-
-                    offset = update_id + 1
+                    offset = update["update_id"] + 1
                     
                     if "message" in update and "text" in update["message"]:
                         chat_id = update["message"]["chat"]["id"]
                         text = update["message"]["text"].strip()
-                        
-                        # ANTI-DOPPIO: Se lo stesso utente manda lo stesso testo in meno di 3 secondi, ignora il duplicato
-                        current_time = time.time()
-                        if chat_id in last_messages:
-                            last_text, last_time = last_messages[chat_id]
-                            if last_text == text and (current_time - last_time) < 3:
-                                continue
-                        
-                        last_messages[chat_id] = (text, current_time)
                         
                         if text.lower() == "/reset":
                             if chat_id in chat_histories:
