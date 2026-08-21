@@ -2,3 +2,5 @@ requests
 tavily-python
 pypdf
 python-docx
+pandas
+openpyxl
