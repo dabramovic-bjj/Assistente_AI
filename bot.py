@@ -11,17 +11,14 @@ TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "TUA_CHIAVE_TAVILY")
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 URL = f"https://api.telegram.org/bot{TOKEN}"
 
-# Dizionario in memoria per memorizzare la cronologia delle chat attive
 chat_histories = {}
 
 def ask_openai(chat_id, prompt):
-    # Inizializza la cronologia per questa chat se non esiste
     if chat_id not in chat_histories:
         chat_histories[chat_id] = [
             {"role": "system", "content": "Sei un assistente virtuale utile e intelligente. Oggi è il 21 agosto 2026."}
         ]
     
-    # Aggiungi il nuovo messaggio dell'utente alla cronologia locale
     chat_histories[chat_id].append({"role": "user", "content": prompt})
 
     check_headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
@@ -42,7 +39,6 @@ def ask_openai(chat_id, prompt):
     except:
         pass
 
-    # Copia temporanea dei messaggi per includere eventualmente la ricerca web
     current_messages = list(chat_histories[chat_id])
     if needs_search:
         try:
@@ -58,10 +54,8 @@ def ask_openai(chat_id, prompt):
         response = requests.post("https://api.openai.com/v1/chat/completions", headers=check_headers, json=data, timeout=30)
         reply = response.json()["choices"][0]["message"]["content"]
         
-        # Salva la risposta del bot nella cronologia ufficiale della chat
         chat_histories[chat_id].append({"role": "assistant", "content": reply})
         
-        # Mantieni la cronologia corta (massimo ultimi 15 messaggi per non appesantire)
         if len(chat_histories[chat_id]) > 16:
             chat_histories[chat_id] = [chat_histories[chat_id][0]] + chat_histories[chat_id][-15:]
             
@@ -78,7 +72,8 @@ def send_message(chat_id, text):
 def main():
     print("Bot avviato...")
     offset = None
-    processed_updates = set() # Memoria temporanea per evitare doppi invii
+    processed_updates = set()
+    last_messages = {} # Dizionario per tracciare l'ultimo messaggio e bloccare i doppi invii
     
     while True:
         try:
@@ -87,12 +82,9 @@ def main():
                 for update in updates["result"]:
                     update_id = update["update_id"]
                     
-                    # Se abbiamo già processato questo update, saltalo subito
                     if update_id in processed_updates:
                         continue
                     processed_updates.add(update_id)
-                    
-                    # Puliamo la lista per non appesantire la memoria (teniamo solo gli ultimi 100)
                     if len(processed_updates) > 100:
                         processed_updates.pop()
 
@@ -101,6 +93,15 @@ def main():
                     if "message" in update and "text" in update["message"]:
                         chat_id = update["message"]["chat"]["id"]
                         text = update["message"]["text"].strip()
+                        
+                        # ANTI-DOPPIO: Se lo stesso utente manda lo stesso testo in meno di 3 secondi, ignora il duplicato
+                        current_time = time.time()
+                        if chat_id in last_messages:
+                            last_text, last_time = last_messages[chat_id]
+                            if last_text == text and (current_time - last_time) < 3:
+                                continue
+                        
+                        last_messages[chat_id] = (text, current_time)
                         
                         if text.lower() == "/reset":
                             if chat_id in chat_histories:
