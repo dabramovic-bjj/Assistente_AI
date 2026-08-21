@@ -1,4 +1,4 @@
 requests
 openai
 tavily-python
-pip install supabase
+supabase
