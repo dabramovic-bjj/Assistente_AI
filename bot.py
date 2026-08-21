@@ -69,6 +69,43 @@ def send_message(chat_id, text):
     except:
         pass
 
+def leggi_file_da_telegram(file_id):
+    import io
+    from pypdf import PdfReader
+    from docx import Document
+    
+    # 1. Ottiene il percorso del file dai server di Telegram
+    file_info = requests.get(f"{URL}/getFile?file_id={file_id}").json()
+    if not file_info.get("ok"):
+        return "Errore nel recupero del file da Telegram."
+    
+    file_path = file_info["result"]["file_path"]
+    file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+    
+    # 2. Scarica il file in memoria
+    file_bytes = requests.get(file_url).content
+    estensione = file_path.split(".")[-1].lower()
+    
+    testo_estratto = ""
+    
+    try:
+        if estensione == "pdf":
+            reader = PdfReader(io.BytesIO(file_bytes))
+            for page in reader.pages:
+                testo_estratto += page.extract_text() or ""
+        elif estensione in ["docx", "doc"]:
+            doc = Document(io.BytesIO(file_bytes))
+            for para in doc.paragraphs:
+                testo_estratto += para.text + "\n"
+        elif estensione in ["txt", "py", "json", "csv", "html", "md"]:
+            testo_estratto = file_bytes.decode("utf-8", errors="ignore")
+        else:
+            return f"Formato .{estensione} non ancora supportato per l'estrazione del testo."
+    except Exception as e:
+        return f"Errore durante la lettura del file: {e}"
+        
+    return testo_estratto
+
 def main():
     print("Bot avviato...")
     offset = None
@@ -80,17 +117,36 @@ def main():
                 for update in updates["result"]:
                     offset = update["update_id"] + 1
                     
-                    if "message" in update and "text" in update["message"]:
-                        chat_id = update["message"]["chat"]["id"]
-                        text = update["message"]["text"].strip()
+                    if "message" in update:
+                        msg = update["message"]
+                        chat_id = msg["chat"]["id"]
                         
-                        if text.lower() == "/reset":
-                            if chat_id in chat_histories:
-                                del chat_histories[chat_id]
-                            send_message(chat_id, "Memoria locale resettata con successo!")
-                        else:
-                            reply = ask_openai(chat_id, text)
-                            send_message(chat_id, reply)
+                        # CASO 1: L'utente invia un documento (PDF, Word, TXT, ecc.)
+                        if "document" in msg:
+                            send_message(chat_id, "📥 File ricevuto, lo sto analizzando...")
+                            file_id = msg["document"]["file_id"]
+                            file_name = msg["document"].get("file_name", "documento")
+                            
+                            contenuto_file = leggi_file_da_telegram(file_id)
+                            
+                            if "Errore" in contenuto_file or "non ancora supportato" in contenuto_file:
+                                send_message(chat_id, contenuto_file)
+                            else:
+                                prompt_analisi = f"Analizza il seguente documento ({file_name}). Estrai i dati chiave, fai una sintesi dettagliata e crea un report strutturato:\n\n{contenuto_file}"
+                                reply = ask_openai(chat_id, prompt_analisi)
+                                send_message(chat_id, reply)
+                                
+                        # CASO 2: L'utente invia un normale messaggio di testo
+                        elif "text" in msg:
+                            text = msg["text"].strip()
+                            
+                            if text.lower() == "/reset":
+                                if chat_id in chat_histories:
+                                    del chat_histories[chat_id]
+                                send_message(chat_id, "Memoria locale resettata con successo!")
+                            else:
+                                reply = ask_openai(chat_id, text)
+                                send_message(chat_id, reply)
         except:
             time.sleep(3)
 
